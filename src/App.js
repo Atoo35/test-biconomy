@@ -2,12 +2,15 @@ import './App.css';
 import logo from './logo.svg';
 import { useCallback, useEffect, useState } from 'react';
 import SocialLogin from "@biconomy/web3-auth";
+import { ChainId } from '@biconomy/core-types'
 import { ethers } from 'ethers';
+import SmartAccount from '@biconomy/smart-account';
 
 function App () {
   const [socialLoginSdk, setSocialLoginSdk] = useState(null);
   const [address, setAddress] = useState(null);
-
+  const [smartAccount, setSmartAccount] = useState(null);
+  const nftAddress = "0xc38db2341bf380bb2bc5f67e74420c1bfb991c6e"
   const connectWallet = useCallback(async () => {
     if (address) return;
     if (socialLoginSdk?.provider) {
@@ -19,10 +22,51 @@ function App () {
       console.info('web3Provider', web3Provider)
       const signer = web3Provider.getSigner();
       const gotAccount = await signer.getAddress();
-      setAddress(gotAccount);
+      // setAddress(gotAccount);
       const network = await web3Provider.getNetwork();
       console.table({ signer, gotAccount, network });
       console.info('userInfo', await socialLoginSdk.getUserInfo())
+
+      let options = {
+        activeNetworkId: ChainId.POLYGON_MUMBAI,
+        supportedNetworkIds: [ChainId.POLYGON_MUMBAI],
+        networkConfig: [{
+          chainId: ChainId.POLYGON_MUMBAI,
+          dappAPIKey: process.env.REACT_APP_BICONOMY_API_KEY,
+        }]
+      }
+      let smartAccount = new SmartAccount(web3Provider, options);
+      smartAccount = await smartAccount.init();
+      // console.log('accountState', await smartAccount.getSmartAccountState());  //contains isDeployed
+      // console.log(smartAccount)
+      const smartAccountAddress = await smartAccount.address;
+      setAddress(smartAccountAddress);
+      setSmartAccount(smartAccount);
+
+
+      //---------Listening to events----------------
+      smartAccount.on('txHashGenerated', (response) => {
+        console.log('txHashGenerated event received in AddLP via emitter', response);
+      });
+
+      smartAccount.on('txHashChanged', (response) => {
+        console.log('txHashChanged event received in AddLP via emitter', response);
+      });
+
+      smartAccount.on('txMined', (response) => {
+        console.log('txMined event received in AddLP via emitter', response);
+      });
+
+      smartAccount.on('error', (response) => {
+        console.log('error event received in AddLP via emitter', response);
+      });
+
+      // get all smart account versions available and update in state
+      const { data } = await smartAccount.getSmartAccountsByOwner({
+        chainId: options.activeNetworkId,
+        owner: address || gotAccount,
+      });
+      console.info("getSmartAccountsByOwner", data);
       // socialLoginSdk.hideWallet()
       return
     }
@@ -48,6 +92,25 @@ function App () {
       setSocialLoginSdk(null)
       setAddress(null);
       socialLoginSdk.logout()
+    }
+  }
+
+  const mint = async () => {
+    if (smartAccount && address) {
+      const erc1155Interface = new ethers.utils.Interface([
+        'function mint(address account, uint256 id, uint256 amount, bytes memory data)'
+      ])
+      const data = erc1155Interface.encodeFunctionData(
+        'mint', [address, 1, 1, '0x']
+      )
+      const tx1 = {
+        to: nftAddress,
+        data
+      }
+      console.log('smartAccountAddress', address)
+
+      const txResponse = await smartAccount.sendGasLessTransaction({ transaction: tx1 });
+      console.log('txResponse', txResponse)
     }
   }
 
@@ -101,7 +164,13 @@ function App () {
   return (
     <div className="App">
       <header className="App-header">
-        {socialLoginSdk && address ? <button onClick={disconnect}>Disconnect</button> : <button onClick={connectWallet}>Connect Wallet</button>}
+        {socialLoginSdk && address ?
+          <div>
+            <button onClick={disconnect}>Disconnect</button>
+            <button onClick={mint}>Mint SBT</button>
+          </div> :
+          <button onClick={connectWallet}>Connect Wallet</button>
+        }
 
 
         <img src={logo} className="App-logo" alt="logo" />
